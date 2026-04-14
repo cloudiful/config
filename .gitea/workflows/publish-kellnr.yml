@@ -1,0 +1,43 @@
+name: CI
+run-name: CI by ${{ gitea.actor }}
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run default tests
+        run: cargo test
+
+  publish:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish crate to Kellnr
+        env:
+          CARGO_REGISTRIES_KELLNR_TOKEN: ${{ secrets.KELLNR_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRIES_KELLNR_TOKEN" ]; then
+            echo "Missing secret: KELLNR_TOKEN"
+            exit 1
+          fi
+          cargo publish --registry kellnr
