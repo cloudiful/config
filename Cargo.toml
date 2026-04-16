@@ -1,6 +1,6 @@
 [package]
 name = "cloudiful-config"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "Small serde-based config helpers for TOML, JSON, JSONC, env overrides, and atomic saves."
 license = "MIT"
