@@ -32,6 +32,34 @@ Use `read_existing(path)` when the file must already exist.
 
 Use `read_or_create_default(path)` when you want the "create on first run" behavior explicitly without environment overrides.
 
+## Automatic config paths
+
+If you do not want to hardcode a full path, use the platform-aware helpers:
+
+- `config_dir("my-app")`
+- `config_path("my-app", "config.toml")`
+
+They resolve to the standard per-user config location for the current OS:
+
+- Linux and other XDG platforms: `$XDG_CONFIG_HOME/my-app` or `~/.config/my-app`
+- macOS: `~/Library/Application Support/my-app`
+- Windows: `%APPDATA%\\my-app`
+
+Example:
+
+```rust,no_run
+use cloudiful_config::{config_path, read_or_create_default};
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Deserialize, Serialize)]
+struct AppConfig {
+    port: u16,
+}
+
+let path = config_path("my-app", "config.toml").unwrap();
+let config: AppConfig = read_or_create_default(&path).unwrap();
+```
+
 ## Writing config
 
 `save_inferred(path, config)` is the recommended write API. It infers the output format from the path extension:

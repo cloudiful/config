@@ -1,10 +1,12 @@
 mod env;
 mod file;
+mod paths;
 
 use std::io;
 use std::path::Path;
 
 pub use file::FileType;
+pub use paths::{config_dir, config_path};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConfigSource<P, S> {
