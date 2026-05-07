@@ -4,7 +4,8 @@ Small serde-based configuration helpers for the common app case:
 
 - Read typed config from the platform-default user config directory.
 - Create a missing `config.toml` from `T::default()`.
-- Apply optional environment variable overrides on top of the file.
+- Apply optional environment variable overrides.
+- Resolve explicit `secret://...` references before deserializing.
 - Save config back atomically as TOML.
 
 For an app named `stock`, the default file path is:
@@ -20,13 +21,14 @@ For an app named `stock`, the default file path is:
 cloudiful-config = "0.5.0"
 ```
 
-## API
+Enable `keyring` when you want `secret://keyring?...` references to resolve through the system credential store:
 
-The public API is intentionally small:
+```toml
+[dependencies]
+cloudiful-config = { version = "0.5.0", features = ["keyring"] }
+```
 
-- `read(app_name, options)`
-- `save(app_name, config)`
-- `ReadOptions`
+## Usage
 
 Example:
 
@@ -45,9 +47,14 @@ let config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"
 save("stock", config).unwrap();
 ```
 
-## Environment variable rules
+## Read behavior
 
-- Pass `Some(ReadOptions::with_env_prefix("APP_"))` to `read(...)` when you want env overrides.
+- `read(...)` loads the default config file, creates it from `T::default()` if missing, applies optional env overrides, resolves secret references, and then deserializes into `T`.
+- `save(...)` writes TOML back to the same default path.
+
+### Environment overrides
+
+- Pass `Some(ReadOptions::with_env_prefix("APP_"))` to enable env overrides.
 - Keys must start with the configured prefix.
 - The suffix after the prefix is lowercased before matching fields.
 - `__` creates nested objects.
@@ -55,3 +62,39 @@ save("stock", config).unwrap();
 - If JSON parsing fails, the raw value is treated as a string.
 - Arrays must be provided as full JSON values such as `["a","b"]`.
 - Array index syntax is not supported.
+
+### Secret references
+
+- Only explicit string values starting with `secret://` are resolved.
+- Secret resolution is strict: invalid or missing secrets return an error.
+- `save(...)` never resolves or writes secrets to the system store. If a config value is `secret://...`, it is saved as that literal string.
+- Query parameters support percent-encoding.
+
+Supported provider:
+
+- `keyring` via the optional `keyring` feature
+
+Reference format:
+
+```text
+secret://keyring?service=<service>&user=<user>
+```
+
+- `service` is required.
+- `user` is required.
+
+Example TOML:
+
+```toml
+[database]
+user = "app"
+password = "secret://keyring?service=stock&user=db-prod"
+```
+
+Example environment override:
+
+```bash
+APP_DATABASE__PASSWORD=secret://keyring?service=stock&user=db-prod
+```
+
+On macOS this resolves through Keychain via the Rust `keyring` crate. The same reference format also works for other platforms supported by `keyring`.

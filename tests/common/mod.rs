@@ -37,6 +37,30 @@ pub struct NestedConf {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct SecretConf {
+    pub database: SecretDatabaseConf,
+    pub tokens: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct SecretDatabaseConf {
+    pub user: String,
+    pub password: String,
+}
+
+impl Default for SecretConf {
+    fn default() -> Self {
+        Self {
+            database: SecretDatabaseConf {
+                user: "app".to_string(),
+                password: "password".to_string(),
+            },
+            tokens: vec!["token".to_string()],
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct EnvConf {
     pub host: String,
     pub port: u16,
@@ -120,6 +144,29 @@ pub fn with_env_vars(vars: &[(&str, &str)], test: impl FnOnce()) {
 
 pub fn with_test_config_home(base: &Path, test: impl FnOnce()) {
     with_test_config_home_and_env(base, &[], test);
+}
+
+pub fn with_test_config_home_result<T>(
+    base: &Path,
+    test: impl FnOnce() -> Result<T, std::io::Error>,
+) -> Result<T, std::io::Error> {
+    let mut result = None;
+    with_test_config_home(base, || {
+        result = Some(test());
+    });
+    result.expect("test closure should run")
+}
+
+pub fn with_test_config_home_and_env_result<T>(
+    base: &Path,
+    extra_vars: &[(&str, Option<&str>)],
+    test: impl FnOnce() -> Result<T, std::io::Error>,
+) -> Result<T, std::io::Error> {
+    let mut result = None;
+    with_test_config_home_and_env(base, extra_vars, || {
+        result = Some(test());
+    });
+    result.expect("test closure should run")
 }
 
 pub fn with_test_config_home_and_env(

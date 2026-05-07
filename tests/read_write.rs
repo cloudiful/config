@@ -1,7 +1,7 @@
 mod common;
 
 use cloudiful_config::{read, save};
-use common::{Conf, expected_default_config_path, temp_dir, with_test_config_home};
+use common::{Conf, SecretConf, expected_default_config_path, temp_dir, with_test_config_home, with_test_config_home_and_env_result, with_test_config_home_result};
 use std::fs;
 use std::io::ErrorKind;
 
@@ -79,13 +79,82 @@ fn read_existing_toml_is_returned() {
     });
 }
 
-fn with_test_config_home_result<T>(
-    config_root: &std::path::Path,
-    test: impl FnOnce() -> Result<T, std::io::Error>,
-) -> Result<T, std::io::Error> {
-    let mut result = None;
-    with_test_config_home(config_root, || {
-        result = Some(test());
+#[test]
+fn save_preserves_secret_reference_strings() {
+    let config_root = temp_dir();
+
+    with_test_config_home(&config_root, || {
+        let config = SecretConf {
+            database: common::SecretDatabaseConf {
+                user: "app".to_string(),
+                password: "secret://keyring?service=stock&user=db-prod".to_string(),
+            },
+            tokens: vec!["secret://keyring?service=stock&user=api-token".to_string()],
+        };
+
+        save("stock", &config).unwrap();
+
+        let path = expected_default_config_path(&config_root, "stock");
+        let content = fs::read_to_string(&path).unwrap();
+
+        assert!(content.contains("secret://keyring?service=stock&user=db-prod"));
+        assert!(content.contains("secret://keyring?service=stock&user=api-token"));
     });
-    result.expect("test closure should run")
+}
+
+#[test]
+fn read_fails_when_secret_reference_cannot_be_resolved() {
+    let config_root = temp_dir();
+
+    with_test_config_home(&config_root, || {
+        save(
+            "stock",
+            SecretConf {
+                database: common::SecretDatabaseConf {
+                    user: "app".to_string(),
+                    password: "secret://keyring?service=stock&user=db-prod".to_string(),
+                },
+                tokens: vec!["plain-token".to_string()],
+            },
+        )
+        .unwrap();
+    });
+
+    let err = with_test_config_home_result(&config_root, || read::<SecretConf>("stock", None)).unwrap_err();
+
+    assert!(matches!(
+        err.kind(),
+        ErrorKind::Unsupported | ErrorKind::NotFound
+    ));
+    assert!(err.to_string().contains("database.password"));
+}
+
+#[test]
+fn env_secret_override_is_applied_after_file_load() {
+    let config_root = temp_dir();
+
+    with_test_config_home(&config_root, || {
+        save("stock", SecretConf::default()).unwrap();
+    });
+
+    let err = with_test_config_home_and_env_result(
+        &config_root,
+        &[(
+            "APP_DATABASE__PASSWORD",
+            Some("secret://keyring?service=stock&user=db-prod"),
+        )],
+        || {
+            read::<SecretConf>(
+                "stock",
+                Some(cloudiful_config::ReadOptions::with_env_prefix("APP_")),
+            )
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        err.kind(),
+        ErrorKind::Unsupported | ErrorKind::NotFound
+    ));
+    assert!(err.to_string().contains("database.password"));
 }

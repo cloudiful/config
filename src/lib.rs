@@ -1,6 +1,7 @@
 mod env;
 mod file;
 mod paths;
+mod secret;
 
 use std::io;
 
@@ -63,18 +64,37 @@ where
     T: serde::de::DeserializeOwned + Default + serde::Serialize,
 {
     let path = paths::default_config_path(app_name)?;
-    let config = if !path.is_file() {
+    let mut config_value = if !path.is_file() {
         let default_config = T::default();
         file::write_config(&path, &default_config, file::FileType::TOML)?;
-        default_config
+        serde_json::to_value(default_config).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to serialize default config before applying overrides for {}: {e}",
+                    path.display()
+                ),
+            )
+        })?
     } else {
-        file::read_config(&path)?
+        file::read_config_value(&path)?
     };
 
-    match options.and_then(|options| options.env_prefix) {
-        Some(prefix) => env::apply_env_overrides(config, prefix),
-        None => Ok(config),
+    if let Some(prefix) = options.and_then(|options| options.env_prefix) {
+        config_value = env::apply_env_overrides(config_value, prefix)?;
     }
+
+    secret::resolve_secret_refs(&mut config_value)?;
+
+    serde_json::from_value(config_value).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to deserialize config {} into requested type: {e}",
+                path.display()
+            ),
+        )
+    })
 }
 
 #[cfg(test)]

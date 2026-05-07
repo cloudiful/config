@@ -266,10 +266,7 @@ fn strip_jsonc_comments(content: &str) -> String {
     output
 }
 
-pub(crate) fn read_config<T>(path: &Path) -> Result<T, io::Error>
-where
-    T: serde::de::DeserializeOwned,
-{
+pub(crate) fn read_config_value(path: &Path) -> Result<serde_json::Value, io::Error> {
     let format = FileFormat::from_path(path)?;
     let content = fs::read_to_string(path).map_err(|err| {
         io::Error::new(
@@ -279,12 +276,21 @@ where
     })?;
 
     match format {
-        FileFormat::Toml => toml::from_str(&content).map_err(|e| {
-            io::Error::new(
-                ErrorKind::InvalidData,
-                format!("failed to parse TOML config {}: {e}", path.display()),
-            )
-        }),
+        FileFormat::Toml => {
+            let toml_value: toml::Value = toml::from_str(&content).map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("failed to parse TOML config {}: {e}", path.display()),
+                )
+            })?;
+
+            serde_json::to_value(toml_value).map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("failed to convert TOML config {} to JSON value: {e}", path.display()),
+                )
+            })
+        }
         FileFormat::Json => serde_json::from_str(&content).map_err(|e| {
             io::Error::new(
                 ErrorKind::InvalidData,
