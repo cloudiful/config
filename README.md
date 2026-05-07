@@ -17,12 +17,12 @@ For an app named `stock`, the default file path is:
 
 ```toml
 [dependencies]
-cloudiful-config = "0.4.2"
+cloudiful-config = "0.5.0"
 ```
 
 ## API
 
-The public API stays intentionally small:
+The public API is intentionally small:
 
 - `read(app_name, options)`
 - `save(app_name, config)`
@@ -40,27 +40,14 @@ struct AppConfig {
     debug: bool,
 }
 
+let config: AppConfig = read("stock", None).unwrap();
 let config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"))).unwrap();
 save("stock", config).unwrap();
 ```
 
-If you do not need environment overrides, pass `None`:
-
-```rust,no_run
-use cloudiful_config::read;
-use serde::{Deserialize, Serialize};
-
-#[derive(Default, Deserialize, Serialize)]
-struct AppConfig {
-    port: u16,
-}
-
-let config: AppConfig = read("stock", None).unwrap();
-```
-
 ## Environment variable rules
 
-- Set `ReadOptions { env_prefix: Some("APP_") }` or use `ReadOptions::with_env_prefix("APP_")`.
+- Pass `Some(ReadOptions::with_env_prefix("APP_"))` to `read(...)` when you want env overrides.
 - Keys must start with the configured prefix.
 - The suffix after the prefix is lowercased before matching fields.
 - `__` creates nested objects.

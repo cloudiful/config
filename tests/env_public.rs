@@ -15,6 +15,7 @@ fn env_prefix_overrides_defaults_when_file_is_missing() {
             ("APP_DEBUG", Some("true")),
             ("APP_TAGS", Some("[\"api\",\"edge\"]")),
             ("APP_DATABASE__URL", Some("postgres://db/service")),
+            ("APP_DATABASE__POOL_SIZE", None),
         ],
         || {
             let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
@@ -40,11 +41,18 @@ fn env_prefix_overrides_defaults_when_file_is_missing() {
 fn env_invalid_json_falls_back_to_plain_string() {
     let home = temp_dir();
 
-    with_test_config_home_and_env(&home, &[("APP_HOST", Some("{not-json}"))], || {
-        let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
+    with_test_config_home_and_env(
+        &home,
+        &[
+            ("APP_HOST", Some("{not-json}")),
+            ("APP_DATABASE__POOL_SIZE", None),
+        ],
+        || {
+            let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
 
-        assert_eq!(conf.host, "{not-json}");
-    });
+            assert_eq!(conf.host, "{not-json}");
+        },
+    );
 }
 
 #[test]
@@ -56,6 +64,7 @@ fn env_empty_segments_are_ignored() {
         &[
             ("APP_", Some("\"ignored\"")),
             ("APP____", Some("\"also ignored\"")),
+            ("APP_DATABASE__POOL_SIZE", None),
         ],
         || {
             let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
