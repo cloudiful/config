@@ -1,22 +1,23 @@
 mod common;
 
-use cloudiful_config::{ConfigSource, read};
-use common::{EnvConf, NestedConf, temp_path, with_env_vars};
-use std::fs;
-use std::path::Path;
+use cloudiful_config::{ReadOptions, read, save};
+use common::{EnvConf, NestedConf, temp_dir, with_test_config_home, with_test_config_home_and_env};
 
 #[test]
-fn env_only_config_can_use_defaults_as_base() {
-    with_env_vars(
+fn env_prefix_overrides_defaults_when_file_is_missing() {
+    let home = temp_dir();
+
+    with_test_config_home_and_env(
+        &home,
         &[
-            ("APP_HOST", "svc"),
-            ("APP_PORT", "9090"),
-            ("APP_DEBUG", "true"),
-            ("APP_TAGS", "[\"api\",\"edge\"]"),
-            ("APP_DATABASE__URL", "postgres://db/service"),
+            ("APP_HOST", Some("svc")),
+            ("APP_PORT", Some("9090")),
+            ("APP_DEBUG", Some("true")),
+            ("APP_TAGS", Some("[\"api\",\"edge\"]")),
+            ("APP_DATABASE__URL", Some("postgres://db/service")),
         ],
         || {
-            let conf: EnvConf = read(ConfigSource::<&Path, _>::Env { prefix: "APP_" }).unwrap();
+            let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
 
             assert_eq!(
                 conf,
@@ -37,8 +38,10 @@ fn env_only_config_can_use_defaults_as_base() {
 
 #[test]
 fn env_invalid_json_falls_back_to_plain_string() {
-    with_env_vars(&[("APP_HOST", "{not-json}")], || {
-        let conf: EnvConf = read(ConfigSource::<&Path, _>::Env { prefix: "APP_" }).unwrap();
+    let home = temp_dir();
+
+    with_test_config_home_and_env(&home, &[("APP_HOST", Some("{not-json}"))], || {
+        let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
 
         assert_eq!(conf.host, "{not-json}");
     });
@@ -46,10 +49,16 @@ fn env_invalid_json_falls_back_to_plain_string() {
 
 #[test]
 fn env_empty_segments_are_ignored() {
-    with_env_vars(
-        &[("APP_", "\"ignored\""), ("APP____", "\"also ignored\"")],
+    let home = temp_dir();
+
+    with_test_config_home_and_env(
+        &home,
+        &[
+            ("APP_", Some("\"ignored\"")),
+            ("APP____", Some("\"also ignored\"")),
+        ],
         || {
-            let conf: EnvConf = read(ConfigSource::<&Path, _>::Env { prefix: "APP_" }).unwrap();
+            let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
 
             assert_eq!(conf, EnvConf::default());
         },
@@ -58,34 +67,34 @@ fn env_empty_segments_are_ignored() {
 
 #[test]
 fn env_values_override_file_values() {
-    let path = temp_path("config.toml");
-    fs::write(
-        &path,
-        r#"
-host = "from-file"
-port = 8081
-debug = false
-tags = ["file"]
+    let home = temp_dir();
 
-[database]
-url = "postgres://db/file"
-pool_size = 10
-"#,
-    )
-    .unwrap();
+    with_test_config_home(&home, || {
+        save(
+            "stock",
+            EnvConf {
+                host: "from-file".to_string(),
+                port: 8081,
+                debug: false,
+                tags: vec!["file".to_string()],
+                database: NestedConf {
+                    url: "postgres://db/file".to_string(),
+                    pool_size: 10,
+                },
+            },
+        )
+        .unwrap();
+    });
 
-    with_env_vars(
+    with_test_config_home_and_env(
+        &home,
         &[
-            ("APP_PORT", "9090"),
-            ("APP_DATABASE__POOL_SIZE", "20"),
-            ("APP_TAGS", "[\"env\"]"),
+            ("APP_PORT", Some("9090")),
+            ("APP_DATABASE__POOL_SIZE", Some("20")),
+            ("APP_TAGS", Some("[\"env\"]")),
         ],
         || {
-            let conf: EnvConf = read(ConfigSource::FileWithEnv {
-                path: &path,
-                prefix: "APP_",
-            })
-            .unwrap();
+            let conf: EnvConf = read("stock", Some(ReadOptions::with_env_prefix("APP_"))).unwrap();
 
             assert_eq!(
                 conf,

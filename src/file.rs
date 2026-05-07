@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileType {
+pub(crate) enum FileType {
     TOML,
     JSON,
 }
@@ -97,15 +97,6 @@ where
         ));
     }
 
-    let content = serialize_config(config, file_type, path)?;
-    atomic_write(path, &content)
-}
-
-pub(crate) fn write_config_inferred<T>(path: &Path, config: &T) -> io::Result<()>
-where
-    T: serde::Serialize + ?Sized,
-{
-    let file_type = infer_file_type(path)?;
     let content = serialize_config(config, file_type, path)?;
     atomic_write(path, &content)
 }

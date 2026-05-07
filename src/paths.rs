@@ -1,40 +1,43 @@
 use std::ffi::OsString;
 use std::io::{self, ErrorKind};
+use std::path::Component;
 use std::path::{Path, PathBuf};
 
-/// Resolve the per-user config directory for `app_name` on the current OS.
-pub fn config_dir(app_name: &str) -> io::Result<PathBuf> {
+pub(crate) const DEFAULT_CONFIG_FILE_NAME: &str = "config.toml";
+
+pub(crate) fn default_config_path(app_name: &str) -> io::Result<PathBuf> {
     let app_name = Path::new(app_name);
-    validate_relative_path(app_name, "app name")?;
-    Ok(config_root()?.join(app_name))
+    validate_app_name(app_name)?;
+    Ok(config_root_from(|key| std::env::var_os(key))?
+        .join(app_name)
+        .join(DEFAULT_CONFIG_FILE_NAME))
 }
 
-/// Resolve a config file path relative to the per-user config directory.
-pub fn config_path<P>(app_name: &str, relative_path: P) -> io::Result<PathBuf>
-where
-    P: AsRef<Path>,
-{
-    let relative_path = relative_path.as_ref();
-    validate_relative_path(relative_path, "config path")?;
-    Ok(config_dir(app_name)?.join(relative_path))
-}
-
-fn validate_relative_path(path: &Path, label: &str) -> io::Result<()> {
-    if path.as_os_str().is_empty() {
+fn validate_app_name(app_name: &Path) -> io::Result<()> {
+    if app_name.as_os_str().is_empty() {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
-            format!("{label} must not be empty"),
+            "app name must not be empty",
         ));
     }
 
-    if path.is_absolute() {
+    if app_name.is_absolute() {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
-            format!("{label} must be relative, got {}", path.display()),
+            format!("app name must be relative, got {}", app_name.display()),
         ));
     }
 
-    Ok(())
+    match app_name.components().next() {
+        Some(Component::Normal(_)) if app_name.components().count() == 1 => Ok(()),
+        _ => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "app name must be a single path component, got {}",
+                app_name.display()
+            ),
+        )),
+    }
 }
 
 fn env_path_with(get_env: impl Fn(&str) -> Option<OsString>, key: &str) -> Option<PathBuf> {
@@ -93,10 +96,6 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> io::Result<Pa
                 "failed to resolve config directory from XDG_CONFIG_HOME or HOME",
             )
         })
-}
-
-fn config_root() -> io::Result<PathBuf> {
-    config_root_from(|key| std::env::var_os(key))
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -116,6 +116,60 @@ pub fn with_env_vars(vars: &[(&str, &str)], test: impl FnOnce()) {
         .map(|(key, value)| (*key, Some(*value)))
         .collect();
     with_env_changes(&vars, test);
+}
+
+pub fn with_test_config_home(base: &Path, test: impl FnOnce()) {
+    with_test_config_home_and_env(base, &[], test);
+}
+
+pub fn with_test_config_home_and_env(
+    base: &Path,
+    extra_vars: &[(&str, Option<&str>)],
+    test: impl FnOnce(),
+) {
+    let base = base.to_string_lossy().into_owned();
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut vars = vec![("HOME", Some(base.as_str()))];
+        vars.extend_from_slice(extra_vars);
+        with_env_changes(&vars, test);
+    }
+
+    #[cfg(windows)]
+    {
+        let mut vars = vec![
+            ("APPDATA", Some(base.as_str())),
+            ("USERPROFILE", None),
+            ("HOMEDRIVE", None),
+            ("HOMEPATH", None),
+        ];
+        vars.extend_from_slice(extra_vars);
+        with_env_changes(&vars, test);
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let mut vars = vec![("XDG_CONFIG_HOME", Some(base.as_str())), ("HOME", None)];
+        vars.extend_from_slice(extra_vars);
+        with_env_changes(&vars, test);
+    }
+}
+
+pub fn expected_default_config_path(base: &Path, app_name: &str) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        return base
+            .join("Library")
+            .join("Application Support")
+            .join(app_name)
+            .join("config.toml");
+    }
+
+    #[cfg(any(windows, all(not(windows), not(target_os = "macos"))))]
+    {
+        base.join(app_name).join("config.toml")
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

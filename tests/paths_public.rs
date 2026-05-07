@@ -1,56 +1,46 @@
 mod common;
 
-use cloudiful_config::{config_dir, config_path};
-use common::with_env_changes;
+use cloudiful_config::{read, save};
+use common::{Conf, temp_dir, with_env_changes};
+use std::fs;
 use std::io::ErrorKind;
-use std::path::PathBuf;
 
 #[test]
-fn config_path_rejects_absolute_paths() {
-    let err = config_path("demo-app", std::env::temp_dir()).unwrap_err();
-
-    assert_eq!(err.kind(), ErrorKind::InvalidInput);
-    assert!(err.to_string().contains("must be relative"));
-}
-
-#[test]
-fn config_dir_rejects_empty_app_name() {
-    let err = config_dir("").unwrap_err();
+fn read_rejects_empty_app_name() {
+    let err = read::<Conf>("", None).unwrap_err();
 
     assert_eq!(err.kind(), ErrorKind::InvalidInput);
     assert!(err.to_string().contains("must not be empty"));
 }
 
-#[cfg(all(not(windows), not(target_os = "macos")))]
 #[test]
-fn config_dir_prefers_xdg_config_home() {
-    with_env_changes(
-        &[
-            ("XDG_CONFIG_HOME", Some("/tmp/xdg-config")),
-            ("HOME", Some("/tmp/home")),
-        ],
-        || {
-            let path = config_dir("demo-app").unwrap();
+fn save_rejects_nested_app_name() {
+    let err = save("demo-app/nested", Conf::default()).unwrap_err();
 
-            assert_eq!(path, PathBuf::from("/tmp/xdg-config").join("demo-app"));
-        },
-    );
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("single path component"));
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 #[test]
-fn config_dir_falls_back_to_home_dot_config() {
-    with_env_changes(
-        &[("XDG_CONFIG_HOME", None), ("HOME", Some("/tmp/home"))],
-        || {
-            let path = config_path("demo-app", "settings.toml").unwrap();
+fn read_prefers_xdg_config_home() {
+    let xdg_config_home = temp_dir();
+    let xdg_config_home_str = xdg_config_home.to_string_lossy().into_owned();
 
+    with_env_changes(
+        &[
+            ("XDG_CONFIG_HOME", Some(xdg_config_home_str.as_str())),
+            ("HOME", None),
+        ],
+        || {
+            let app_name = "stock";
+            let config: Conf = read(app_name, None).unwrap();
+            let path = xdg_config_home.join(app_name).join("config.toml");
+
+            assert_eq!(config, Conf::default());
             assert_eq!(
-                path,
-                PathBuf::from("/tmp/home")
-                    .join(".config")
-                    .join("demo-app")
-                    .join("settings.toml")
+                fs::read_to_string(&path).unwrap(),
+                toml::to_string_pretty(&config).unwrap()
             );
         },
     );
@@ -58,64 +48,66 @@ fn config_dir_falls_back_to_home_dot_config() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn config_dir_uses_application_support_on_macos() {
-    with_env_changes(&[("HOME", Some("/tmp/home"))], || {
-        let path = config_path("demo-app", "settings.toml").unwrap();
+fn save_uses_application_support_on_macos() {
+    let home = temp_dir();
+    let home_str = home.to_string_lossy().into_owned();
+
+    with_env_changes(&[("HOME", Some(home_str.as_str()))], || {
+        save("stock", Conf::default()).unwrap();
+
+        let path = home
+            .join("Library")
+            .join("Application Support")
+            .join("stock")
+            .join("config.toml");
 
         assert_eq!(
-            path,
-            PathBuf::from("/tmp/home")
-                .join("Library")
-                .join("Application Support")
-                .join("demo-app")
-                .join("settings.toml")
+            fs::read_to_string(path).unwrap(),
+            toml::to_string_pretty(&Conf::default()).unwrap()
         );
     });
 }
 
 #[cfg(windows)]
 #[test]
-fn config_dir_uses_appdata_on_windows() {
+fn save_uses_appdata_on_windows() {
+    let appdata = temp_dir();
+    let appdata_str = appdata.to_string_lossy().into_owned();
+
     with_env_changes(
         &[
-            ("APPDATA", Some(r"C:\Users\alice\AppData\Roaming")),
+            ("APPDATA", Some(appdata_str.as_str())),
             ("USERPROFILE", None),
             ("HOMEDRIVE", None),
             ("HOMEPATH", None),
         ],
         || {
-            let path = config_path("demo-app", "settings.toml").unwrap();
+            save("stock", Conf::default()).unwrap();
+
+            let path = appdata.join("stock").join("config.toml");
 
             assert_eq!(
-                path,
-                PathBuf::from(r"C:\Users\alice\AppData\Roaming")
-                    .join("demo-app")
-                    .join("settings.toml")
+                fs::read_to_string(path).unwrap(),
+                toml::to_string_pretty(&Conf::default()).unwrap()
             );
         },
     );
 }
 
-#[cfg(windows)]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 #[test]
-fn config_dir_falls_back_to_userprofile_on_windows() {
-    with_env_changes(
-        &[
-            ("APPDATA", None),
-            ("USERPROFILE", Some(r"C:\Users\alice")),
-            ("HOMEDRIVE", None),
-            ("HOMEPATH", None),
-        ],
-        || {
-            let path = config_dir("demo-app").unwrap();
+fn read_falls_back_to_home_dot_config() {
+    let home = temp_dir();
+    let home_str = home.to_string_lossy().into_owned();
 
-            assert_eq!(
-                path,
-                PathBuf::from(r"C:\Users\alice")
-                    .join("AppData")
-                    .join("Roaming")
-                    .join("demo-app")
-            );
+    with_env_changes(
+        &[("XDG_CONFIG_HOME", None), ("HOME", Some(home_str.as_str()))],
+        || {
+            let app_name = "stock";
+            let _: Conf = read(app_name, None).unwrap();
+            let path = home.join(".config").join(app_name).join("config.toml");
+
+            assert!(path.exists());
         },
     );
 }

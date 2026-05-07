@@ -1,13 +1,13 @@
 [package]
 name = "cloudiful-config"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2024"
-description = "Small serde-based config helpers for TOML, JSON, JSONC, env overrides, and atomic saves."
+description = "Small serde-based config helpers for default app TOML, env overrides, and atomic saves."
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/cloudiful/config.git"
 documentation = "https://docs.rs/cloudiful-config"
-keywords = ["config", "serde", "jsonc", "toml", "env"]
+keywords = ["config", "serde", "toml", "env"]
 include = [
     "Cargo.toml",
     "README.md",

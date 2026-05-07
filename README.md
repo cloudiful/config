@@ -1,54 +1,53 @@
 # cloudiful-config
 
-Small serde-based configuration helpers for local TOML, JSON, and JSONC files.
+Small serde-based configuration helpers for the common app case:
 
-`cloudiful-config` focuses on the small but common path:
+- Read typed config from the platform-default user config directory.
+- Create a missing `config.toml` from `T::default()`.
+- Apply optional environment variable overrides on top of the file.
+- Save config back atomically as TOML.
 
-- Read typed config from `.toml`, `.json`, or `.jsonc`.
-- Create a missing config file from `T::default()`.
-- Apply environment variable overrides on top of defaults or file-backed config.
-- Save config back atomically as TOML or JSON.
+For an app named `stock`, the default file path is:
 
-It is intentionally narrower than crates like `config-rs` or `Figment`. This
-crate is for applications that already know which file to read and want a small
-read/write helper around Serde types.
+- Linux and other XDG platforms: `$XDG_CONFIG_HOME/stock/config.toml` or `~/.config/stock/config.toml`
+- macOS: `~/Library/Application Support/stock/config.toml`
+- Windows: `%APPDATA%\\stock\\config.toml`
 
 ## Install
 
 ```toml
 [dependencies]
-cloudiful-config = "0.4.1"
+cloudiful-config = "0.4.2"
 ```
 
-## Read modes
+## API
 
-`read(ConfigSource)` stays the main entrypoint:
+The public API stays intentionally small:
 
-- `ConfigSource::File(path)`: read from disk, creating the file from `T::default()` if it does not exist yet.
-- `ConfigSource::Env { prefix }`: start from `T::default()` and apply matching environment variables.
-- `ConfigSource::FileWithEnv { path, prefix }`: read from disk first, then apply environment variables on top.
-
-Use `read_existing(path)` when the file must already exist.
-
-Use `read_or_create_default(path)` when you want the "create on first run" behavior explicitly without environment overrides.
-
-## Automatic config paths
-
-If you do not want to hardcode a full path, use the platform-aware helpers:
-
-- `config_dir("my-app")`
-- `config_path("my-app", "config.toml")`
-
-They resolve to the standard per-user config location for the current OS:
-
-- Linux and other XDG platforms: `$XDG_CONFIG_HOME/my-app` or `~/.config/my-app`
-- macOS: `~/Library/Application Support/my-app`
-- Windows: `%APPDATA%\\my-app`
+- `read(app_name, options)`
+- `save(app_name, config)`
+- `ReadOptions`
 
 Example:
 
 ```rust,no_run
-use cloudiful_config::{config_path, read_or_create_default};
+use cloudiful_config::{ReadOptions, read, save};
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Deserialize, Serialize)]
+struct AppConfig {
+    port: u16,
+    debug: bool,
+}
+
+let config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"))).unwrap();
+save("stock", config).unwrap();
+```
+
+If you do not need environment overrides, pass `None`:
+
+```rust,no_run
+use cloudiful_config::read;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Deserialize, Serialize)]
@@ -56,24 +55,12 @@ struct AppConfig {
     port: u16,
 }
 
-let path = config_path("my-app", "config.toml").unwrap();
-let config: AppConfig = read_or_create_default(&path).unwrap();
+let config: AppConfig = read("stock", None).unwrap();
 ```
-
-## Writing config
-
-`save_inferred(path, config)` is the recommended write API. It infers the output format from the path extension:
-
-- `.toml` writes TOML
-- `.json` writes JSON
-- `.jsonc` also writes standard JSON
-
-`save(path, config, file_type)` is still available for explicit format control, but the format must match the path extension. For example, JSON cannot be written to a `.toml` path.
-
-All writes are atomic: the crate writes to a temporary file in the same directory and then renames it into place.
 
 ## Environment variable rules
 
+- Set `ReadOptions { env_prefix: Some("APP_") }` or use `ReadOptions::with_env_prefix("APP_")`.
 - Keys must start with the configured prefix.
 - The suffix after the prefix is lowercased before matching fields.
 - `__` creates nested objects.
@@ -81,9 +68,3 @@ All writes are atomic: the crate writes to a temporary file in the same director
 - If JSON parsing fails, the raw value is treated as a string.
 - Arrays must be provided as full JSON values such as `["a","b"]`.
 - Array index syntax is not supported.
-
-## JSONC behavior
-
-`.jsonc` inputs support `//` and `/* ... */` comments while reading.
-
-`.jsonc` outputs are written as standard JSON. Comments are not preserved.
