@@ -3,9 +3,8 @@ run-name: CI by ${{ gitea.actor }}
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 jobs:
