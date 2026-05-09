@@ -56,7 +56,11 @@ fn resolve_keyring_secret(secret_ref: &SecretRef, path: &[PathSegment]) -> io::R
 
     #[cfg(feature = "keyring")]
     {
-        let entry = keyring::Entry::new(service, user).map_err(|err| {
+        use keyring_core::{Entry, Error};
+
+        let _ = keyring::use_native_store(false);
+
+        let entry = Entry::new(service, user).map_err(|err| {
             path_error(
                 path,
                 ErrorKind::InvalidInput,
@@ -65,20 +69,27 @@ fn resolve_keyring_secret(secret_ref: &SecretRef, path: &[PathSegment]) -> io::R
         })?;
 
         entry.get_password().map_err(|err| {
-            use keyring::Error;
-
             let detail = match err {
                 Error::NoEntry => "no entry found".to_string(),
                 Error::Ambiguous(_) => "multiple matching entries found".to_string(),
                 Error::NoStorageAccess(_) => "storage access denied".to_string(),
                 Error::BadEncoding(_) => "stored secret is not valid UTF-8".to_string(),
+                Error::BadDataFormat(_, _) => "stored secret has invalid data format".to_string(),
+                Error::BadStoreFormat(reason) => {
+                    format!("store data is malformed: {reason}")
+                }
                 Error::Invalid(attribute, reason) => {
                     format!("invalid {attribute}: {reason}")
                 }
                 Error::TooLong(attribute, limit) => {
                     format!("{attribute} exceeds platform limit {limit}")
                 }
+                Error::NoDefaultStore => "no default keyring store configured".to_string(),
+                Error::NotSupportedByStore(reason) => {
+                    format!("operation not supported by store: {reason}")
+                }
                 Error::PlatformFailure(_) => "platform keyring failure".to_string(),
+                #[allow(unreachable_patterns)]
                 other => other.to_string(),
             };
 

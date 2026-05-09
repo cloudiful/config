@@ -1,6 +1,6 @@
 [package]
 name = "cloudiful-config"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 description = "Small serde-based config helpers for default app TOML/SQL stores, env overrides, and atomic saves."
 license = "MIT"
@@ -16,7 +16,7 @@ include = [
 
 [features]
 default = []
-keyring = ["dep:keyring"]
+keyring = ["dep:keyring", "dep:keyring-core"]
 
 [dependencies]
 postgres = "0.19.13"
@@ -25,3 +25,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 serde_json = "1.0.149"
 keyring = { version = "4.0.0", optional = true }
+keyring-core = { version = "1.0.0", optional = true }
