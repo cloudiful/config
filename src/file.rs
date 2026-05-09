@@ -10,39 +10,11 @@ pub(crate) enum FileType {
     JSON,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FileFormat {
-    Toml,
-    Json,
-    Jsonc,
-}
-
-impl FileFormat {
-    fn from_path(path: &Path) -> io::Result<Self> {
-        match path.extension().and_then(|suffix| suffix.to_str()) {
-            Some("toml") => Ok(Self::Toml),
-            Some("json") => Ok(Self::Json),
-            Some("jsonc") => Ok(Self::Jsonc),
-            _ => Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "config file type not supported for {} (expected .toml, .json, or .jsonc)",
-                    path.display()
-                ),
-            )),
-        }
-    }
-
-    fn write_type(self) -> FileType {
-        match self {
-            Self::Toml => FileType::TOML,
-            Self::Json | Self::Jsonc => FileType::JSON,
-        }
-    }
-}
-
 pub(crate) fn infer_file_type(path: &Path) -> io::Result<FileType> {
-    Ok(FileFormat::from_path(path)?.write_type())
+    Ok(match crate::format::ConfigFormat::from_path(path)? {
+        crate::format::ConfigFormat::Toml => FileType::TOML,
+        crate::format::ConfigFormat::Json => FileType::JSON,
+    })
 }
 
 impl FileType {
@@ -58,26 +30,14 @@ fn serialize_config<T>(config: &T, file_type: FileType, path: &Path) -> io::Resu
 where
     T: serde::Serialize + ?Sized,
 {
-    match file_type {
-        FileType::TOML => toml::to_string_pretty(config).map_err(|e| {
-            io::Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "failed to serialize TOML config for {}: {e}",
-                    path.display()
-                ),
-            )
-        }),
-        FileType::JSON => serde_json::to_string_pretty(config).map_err(|e| {
-            io::Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "failed to serialize JSON config for {}: {e}",
-                    path.display()
-                ),
-            )
-        }),
-    }
+    crate::format::serialize_config(
+        config,
+        match file_type {
+            FileType::TOML => crate::format::ConfigFormat::Toml,
+            FileType::JSON => crate::format::ConfigFormat::Json,
+        },
+        &path.display().to_string(),
+    )
 }
 
 pub(crate) fn write_config<T>(path: &Path, config: &T, file_type: FileType) -> io::Result<()>
@@ -267,7 +227,7 @@ fn strip_jsonc_comments(content: &str) -> String {
 }
 
 pub(crate) fn read_config_value(path: &Path) -> Result<serde_json::Value, io::Error> {
-    let format = FileFormat::from_path(path)?;
+    let format = crate::format::ConfigFormat::from_path(path)?;
     let content = fs::read_to_string(path).map_err(|err| {
         io::Error::new(
             err.kind(),
@@ -276,35 +236,27 @@ pub(crate) fn read_config_value(path: &Path) -> Result<serde_json::Value, io::Er
     })?;
 
     match format {
-        FileFormat::Toml => {
-            let toml_value: toml::Value = toml::from_str(&content).map_err(|e| {
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("failed to parse TOML config {}: {e}", path.display()),
+        crate::format::ConfigFormat::Toml => crate::format::parse_config_value(
+            &content,
+            crate::format::ConfigFormat::Toml,
+            &path.display().to_string(),
+        ),
+        crate::format::ConfigFormat::Json => {
+            if path.extension().and_then(|suffix| suffix.to_str()) == Some("jsonc") {
+                let json_content = strip_jsonc_comments(&content);
+                serde_json::from_str(&json_content).map_err(|e| {
+                    io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!("failed to parse JSONC config {}: {e}", path.display()),
+                    )
+                })
+            } else {
+                crate::format::parse_config_value(
+                    &content,
+                    crate::format::ConfigFormat::Json,
+                    &path.display().to_string(),
                 )
-            })?;
-
-            serde_json::to_value(toml_value).map_err(|e| {
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("failed to convert TOML config {} to JSON value: {e}", path.display()),
-                )
-            })
-        }
-        FileFormat::Json => serde_json::from_str(&content).map_err(|e| {
-            io::Error::new(
-                ErrorKind::InvalidData,
-                format!("failed to parse JSON config {}: {e}", path.display()),
-            )
-        }),
-        FileFormat::Jsonc => {
-            let json_content = strip_jsonc_comments(&content);
-            serde_json::from_str(&json_content).map_err(|e| {
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("failed to parse JSONC config {}: {e}", path.display()),
-                )
-            })
+            }
         }
     }
 }

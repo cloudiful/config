@@ -4,6 +4,8 @@ Small serde-based configuration helpers for the common app case:
 
 - Read typed config from the platform-default user config directory.
 - Create a missing `config.toml` from `T::default()`.
+- Read and write whole config blobs from SQLite/Postgres through the same `read`/`save` API.
+- Use a default config table named `app_configs` unless you override it.
 - Apply optional environment variable overrides.
 - Resolve explicit `secret://...` references before deserializing.
 - Save config back atomically as TOML.
@@ -47,10 +49,67 @@ let config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"
 save("stock", config).unwrap();
 ```
 
+SQLite example:
+
+```rust,no_run
+use cloudiful_config::{read, save, sqlite_store};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Deserialize, Serialize)]
+struct AppConfig {
+    host: String,
+    port: u16,
+}
+
+let conn = Connection::open("config.db").unwrap();
+let mut store = sqlite_store(&conn, "stock");
+
+let config: AppConfig = read(&mut store, None).unwrap();
+save(&mut store, config).unwrap();
+```
+
+Postgres example:
+
+```rust,no_run
+use cloudiful_config::{postgres_store, read, save};
+use postgres::{Client, NoTls};
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Deserialize, Serialize)]
+struct AppConfig {
+    host: String,
+    port: u16,
+}
+
+let mut client = Client::connect("host=localhost user=postgres dbname=app", NoTls).unwrap();
+let mut store = postgres_store(&mut client, "stock");
+
+let config: AppConfig = read(&mut store, None).unwrap();
+save(&mut store, config).unwrap();
+```
+
+Default table schema:
+
+```sql
+CREATE TABLE app_configs (
+  app_name TEXT PRIMARY KEY,
+  config_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+```
+
+SQLite uses the same logical shape, with `updated_at` stored as `TEXT` and `CURRENT_TIMESTAMP`.
+
 ## Read behavior
 
-- `read(...)` loads the default config file, creates it from `T::default()` if missing, applies optional env overrides, resolves secret references, and then deserializes into `T`.
-- `save(...)` writes TOML back to the same default path.
+- `read("app-name", ...)` loads the default config file, creates it from `T::default()` if missing, applies optional env overrides, resolves secret references, and then deserializes into `T`.
+- `read(store, ...)` does the same flow against the provided store.
+- `save("app-name", config)` writes TOML back to the default path.
+- `save(store, config)` writes the full config blob to the provided store.
+- `sqlite_store(conn, "stock")` and `postgres_store(client, "stock")` use the default `app_configs` table.
+- `sqlite_store_with_table(...)` and `postgres_store_with_table(...)` let you override the table name.
+- When the target table already exists but does not match the expected config schema, the store returns an error instead of writing into it.
 
 ### Environment overrides
 

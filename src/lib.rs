@@ -1,7 +1,9 @@
 mod env;
 mod file;
+mod format;
 mod paths;
 mod secret;
+mod sql;
 
 use std::io;
 
@@ -18,69 +20,104 @@ impl<'a> ReadOptions<'a> {
     }
 }
 
-/// Save config to the platform-default `config.toml` for `app_name`.
-///
-/// On macOS, `stock` resolves to
-/// `~/Library/Application Support/stock/config.toml`.
-///
-/// ```rust,no_run
-/// use cloudiful_config::save;
-/// use serde::Serialize;
-///
-/// #[derive(Serialize)]
-/// struct AppConfig {
-///     port: u16,
-/// }
-///
-/// save("stock", AppConfig { port: 8080 }).unwrap();
-/// ```
-pub fn save<T>(app_name: &str, config: T) -> io::Result<()>
+pub trait ConfigSource {
+    fn source_name(&self) -> String;
+    fn read_value(&mut self) -> io::Result<Option<serde_json::Value>>;
+    fn write_config<T>(&mut self, config: &T) -> io::Result<()>
+    where
+        T: serde::Serialize;
+}
+
+impl<T> ConfigSource for &mut T
+where
+    T: ConfigSource + ?Sized,
+{
+    fn source_name(&self) -> String {
+        (**self).source_name()
+    }
+
+    fn read_value(&mut self) -> io::Result<Option<serde_json::Value>> {
+        (**self).read_value()
+    }
+
+    fn write_config<S>(&mut self, config: &S) -> io::Result<()>
+    where
+        S: serde::Serialize,
+    {
+        (**self).write_config(config)
+    }
+}
+
+impl ConfigSource for &str {
+    fn source_name(&self) -> String {
+        match paths::default_config_path(self) {
+            Ok(path) => path.display().to_string(),
+            Err(_) => (*self).to_string(),
+        }
+    }
+
+    fn read_value(&mut self) -> io::Result<Option<serde_json::Value>> {
+        let path = paths::default_config_path(self)?;
+        if path.is_file() {
+            file::read_config_value(&path).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn write_config<T>(&mut self, config: &T) -> io::Result<()>
+    where
+        T: serde::Serialize,
+    {
+        let path = paths::default_config_path(self)?;
+        file::write_config(&path, config, file::FileType::TOML)
+    }
+}
+
+pub fn save<T>(mut source: impl ConfigSource, config: T) -> io::Result<()>
 where
     T: serde::Serialize,
 {
-    let path = paths::default_config_path(app_name)?;
-    file::write_config(&path, &config, file::FileType::TOML)
+    source.write_config(&config)
 }
 
-/// Read config from the platform-default `config.toml` for `app_name`,
-/// creating the file from `T::default()` when it does not already exist.
-///
-/// Use [`ReadOptions`] to apply environment variable overrides after the file
-/// is loaded.
-///
-/// ```rust,no_run
-/// use cloudiful_config::{ReadOptions, read};
-/// use serde::{Deserialize, Serialize};
-///
-/// #[derive(Default, Deserialize, Serialize)]
-/// struct AppConfig {
-///     port: u16,
-/// }
-///
-/// let _config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"))).unwrap();
-/// ```
-pub fn read<T>(app_name: &str, options: Option<ReadOptions<'_>>) -> Result<T, io::Error>
+pub fn read<T>(
+    mut source: impl ConfigSource,
+    options: Option<ReadOptions<'_>>,
+) -> Result<T, io::Error>
 where
     T: serde::de::DeserializeOwned + Default + serde::Serialize,
 {
-    let path = paths::default_config_path(app_name)?;
-    let mut config_value = if !path.is_file() {
-        let default_config = T::default();
-        file::write_config(&path, &default_config, file::FileType::TOML)?;
-        serde_json::to_value(default_config).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "failed to serialize default config before applying overrides for {}: {e}",
-                    path.display()
-                ),
-            )
-        })?
-    } else {
-        file::read_config_value(&path)?
-    };
+    let source_name = source.source_name();
+    let config_value = match source.read_value()? {
+        Some(value) => value,
+        None => {
+            let default_config = T::default();
+                    let default_value = serde_json::to_value(&default_config).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                    format!(
+                        "failed to serialize default config before applying overrides for {source_name}: {e}"
+                            ),
+                        )
+                    })?;
+                    source.write_config(&default_config)?;
+                    default_value
+                }
+            };
 
-    if let Some(prefix) = options.and_then(|options| options.env_prefix) {
+    process_config_value(config_value, options.and_then(|opt| opt.env_prefix), &source_name)
+}
+
+fn process_config_value<T>(
+    mut config_value: serde_json::Value,
+    env_prefix: Option<&str>,
+    source: &str,
+) -> Result<T, io::Error>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if let Some(prefix) = env_prefix {
         config_value = env::apply_env_overrides(config_value, prefix)?;
     }
 
@@ -89,13 +126,18 @@ where
     serde_json::from_value(config_value).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "failed to deserialize config {} into requested type: {e}",
-                path.display()
-            ),
+            format!("failed to deserialize config {source} into requested type: {e}"),
         )
     })
 }
+
+pub use sql::sqlite_store;
+pub use sql::postgres_store;
+pub use sql::postgres_store_with_table;
+pub use sql::sqlite_store_with_table;
+pub use sql::DEFAULT_CONFIG_TABLE;
+pub use sql::PostgresConfigStore;
+pub use sql::SqliteConfigStore;
 
 #[cfg(test)]
 mod tests;
