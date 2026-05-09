@@ -4,7 +4,7 @@ Small serde-based configuration helpers for the common app case:
 
 - Read typed config from the platform-default user config directory.
 - Create a missing `config.toml` from `T::default()`.
-- Read and write whole config blobs from SQLite/Postgres through the same `read`/`save` API.
+- Read and write whole config blobs from Postgres through the same `read`/`save` API.
 - Use a default config table named `app_configs` unless you override it.
 - Apply optional environment variable overrides.
 - Resolve explicit `secret://...` references before deserializing.
@@ -20,14 +20,14 @@ For an app named `stock`, the default file path is:
 
 ```toml
 [dependencies]
-cloudiful-config = "0.5.0"
+cloudiful-config = "0.6.1"
 ```
 
 Enable `keyring` when you want `secret://keyring?...` references to resolve through the system credential store:
 
 ```toml
 [dependencies]
-cloudiful-config = { version = "0.5.0", features = ["keyring"] }
+cloudiful-config = { version = "0.6.1", features = ["keyring"] }
 ```
 
 ## Usage
@@ -47,26 +47,6 @@ struct AppConfig {
 let config: AppConfig = read("stock", None).unwrap();
 let config: AppConfig = read("stock", Some(ReadOptions::with_env_prefix("STOCK_"))).unwrap();
 save("stock", config).unwrap();
-```
-
-SQLite example:
-
-```rust,no_run
-use cloudiful_config::{read, save, sqlite_store};
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
-
-#[derive(Default, Deserialize, Serialize)]
-struct AppConfig {
-    host: String,
-    port: u16,
-}
-
-let conn = Connection::open("config.db").unwrap();
-let mut store = sqlite_store(&conn, "stock");
-
-let config: AppConfig = read(&mut store, None).unwrap();
-save(&mut store, config).unwrap();
 ```
 
 Postgres example:
@@ -99,16 +79,14 @@ CREATE TABLE app_configs (
 )
 ```
 
-SQLite uses the same logical shape, with `updated_at` stored as `TEXT` and `CURRENT_TIMESTAMP`.
-
 ## Read behavior
 
 - `read("app-name", ...)` loads the default config file, creates it from `T::default()` if missing, applies optional env overrides, resolves secret references, and then deserializes into `T`.
 - `read(store, ...)` does the same flow against the provided store.
 - `save("app-name", config)` writes TOML back to the default path.
 - `save(store, config)` writes the full config blob to the provided store.
-- `sqlite_store(conn, "stock")` and `postgres_store(client, "stock")` use the default `app_configs` table.
-- `sqlite_store_with_table(...)` and `postgres_store_with_table(...)` let you override the table name.
+- `postgres_store(client, "stock")` uses the default `app_configs` table.
+- `postgres_store_with_table(...)` lets you override the table name.
 - When the target table already exists but does not match the expected config schema, the store returns an error instead of writing into it.
 
 ### Environment overrides

@@ -131,13 +131,10 @@ where
     })
 }
 
-pub use sql::sqlite_store;
 pub use sql::postgres_store;
 pub use sql::postgres_store_with_table;
-pub use sql::sqlite_store_with_table;
 pub use sql::DEFAULT_CONFIG_TABLE;
 pub use sql::PostgresConfigStore;
-pub use sql::SqliteConfigStore;
 
 #[cfg(test)]
 mod tests;
