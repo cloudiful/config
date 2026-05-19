@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -85,14 +86,18 @@ impl Default for EnvConf {
 }
 
 pub fn temp_dir() -> PathBuf {
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "config-crate-tests-{}-{}",
+        "config-crate-tests-{}-{}-{}",
         std::process::id(),
-        unique
+        unique,
+        id
     ));
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -200,6 +205,64 @@ pub fn with_test_config_home_and_env(
         let mut vars = vec![("XDG_CONFIG_HOME", Some(base.as_str())), ("HOME", None)];
         vars.extend_from_slice(extra_vars);
         with_env_changes(&vars, test);
+    }
+}
+
+pub fn with_test_config_home_env_and_current_dir(
+    base: &Path,
+    current_dir: &Path,
+    extra_vars: &[(&str, Option<&str>)],
+    test: impl FnOnce(),
+) {
+    let _guard = env_lock().lock().unwrap();
+    let previous_dir = std::env::current_dir().unwrap();
+    let base = base.to_string_lossy().into_owned();
+
+    #[cfg(target_os = "macos")]
+    let mut vars = vec![("HOME", Some(base.as_str()))];
+
+    #[cfg(windows)]
+    let mut vars = vec![
+        ("APPDATA", Some(base.as_str())),
+        ("USERPROFILE", None),
+        ("HOMEDRIVE", None),
+        ("HOMEPATH", None),
+    ];
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let mut vars = vec![("XDG_CONFIG_HOME", Some(base.as_str())), ("HOME", None)];
+
+    vars.extend_from_slice(extra_vars);
+
+    let previous: Vec<(String, Option<OsString>)> = vars
+        .iter()
+        .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+        .collect();
+
+    for (key, value) in vars {
+        match value {
+            Some(value) => unsafe {
+                std::env::set_var(key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
+    }
+
+    std::env::set_current_dir(current_dir).unwrap();
+    test();
+    std::env::set_current_dir(previous_dir).unwrap();
+
+    for (key, value) in previous {
+        match value {
+            Some(value) => unsafe {
+                std::env::set_var(&key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(&key);
+            },
+        }
     }
 }
 

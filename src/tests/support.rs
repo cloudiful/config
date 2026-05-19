@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -61,14 +62,18 @@ impl Default for EnvConf {
 }
 
 pub(super) fn temp_dir() -> PathBuf {
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "config-crate-tests-{}-{}",
+        "config-crate-tests-{}-{}-{}",
         std::process::id(),
-        unique
+        unique,
+        id
     ));
     fs::create_dir_all(&dir).unwrap();
     dir

@@ -92,6 +92,10 @@ CREATE TABLE app_configs (
 ### Environment overrides
 
 - Pass `Some(ReadOptions::with_env_prefix("APP_"))` to enable env overrides.
+- `read(...)` loads `.env` from the current directory by default before applying env overrides.
+- `.env` is optional and never overrides existing environment variables.
+- Use `ReadOptions::default().without_dotenv()` or `ReadOptions::with_env_prefix("APP_").without_dotenv()` to opt out.
+- Use `with_dotenv_path(path)` to load a specific dotenv file.
 - Keys must start with the configured prefix.
 - The suffix after the prefix is lowercased before matching fields.
 - `__` creates nested objects.
